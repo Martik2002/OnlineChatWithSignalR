@@ -1,0 +1,6 @@
+﻿services:
+  onlinechatwithsignalr:
+    image: onlinechatwithsignalr
+    build:
+      context: .
+      dockerfile: OnlineChatWithSignalR/Dockerfile

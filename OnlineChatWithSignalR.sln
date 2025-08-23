@@ -1,0 +1,21 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OnlineChatWithSignalR", "OnlineChatWithSignalR\OnlineChatWithSignalR.csproj", "{E46FBACE-A27F-4CD5-B88B-1FA3DA20AD24}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{2CBA5460-1461-4C0E-9B78-01A2FC66216D}"
+	ProjectSection(SolutionItems) = preProject
+		compose.yaml = compose.yaml
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E46FBACE-A27F-4CD5-B88B-1FA3DA20AD24}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E46FBACE-A27F-4CD5-B88B-1FA3DA20AD24}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E46FBACE-A27F-4CD5-B88B-1FA3DA20AD24}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E46FBACE-A27F-4CD5-B88B-1FA3DA20AD24}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
