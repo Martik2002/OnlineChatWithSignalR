@@ -1,5 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+# 
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OnlineChatWithSignalR", "OnlineChatWithSignalR\OnlineChatWithSignalR.csproj", "{E46FBACE-A27F-4CD5-B88B-1FA3DA20AD24}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{2CBA5460-1461-4C0E-9B78-01A2FC66216D}"
@@ -8,6 +9,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Client", "Client\Client.csproj", "{88786E74-6BE5-427A-A3BF-C32DAD6FA4C6}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{C63907E5-49F1-4A7C-9D4F-46B619337207}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OnlineChatWithSignalR.Tests", "tests\OnlineChatWithSignalR.Tests\OnlineChatWithSignalR.Tests.csproj", "{981DC80C-5677-4C1B-84D9-F88F7AAF3E14}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -23,5 +28,12 @@ Global
 		{88786E74-6BE5-427A-A3BF-C32DAD6FA4C6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{88786E74-6BE5-427A-A3BF-C32DAD6FA4C6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{88786E74-6BE5-427A-A3BF-C32DAD6FA4C6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{981DC80C-5677-4C1B-84D9-F88F7AAF3E14}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{981DC80C-5677-4C1B-84D9-F88F7AAF3E14}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{981DC80C-5677-4C1B-84D9-F88F7AAF3E14}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{981DC80C-5677-4C1B-84D9-F88F7AAF3E14}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{981DC80C-5677-4C1B-84D9-F88F7AAF3E14} = {C63907E5-49F1-4A7C-9D4F-46B619337207}
 	EndGlobalSection
 EndGlobal
