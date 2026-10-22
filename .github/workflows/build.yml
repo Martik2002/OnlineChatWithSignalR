@@ -7,7 +7,7 @@ on:
     branches: [ master ]
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,3 +23,17 @@ jobs:
 
       - name: Build
         run: dotnet build OnlineChatWithSignalR.sln --no-restore --configuration Release
+
+      # Integration tests start PostgreSQL in Docker via Testcontainers
+      - name: Test
+        run: dotnet test OnlineChatWithSignalR.sln --no-build --configuration Release --logger "console;verbosity=normal" --logger "trx;LogFileName=results.trx" --results-directory TestResults
+
+      - name: Test summary
+        if: always()
+        run: |
+          counters=$(grep -o '<Counters [^>]*>' TestResults/results.trx)
+          total=$(echo "$counters" | grep -o 'total="[0-9]*"' | grep -o '[0-9]*')
+          passed=$(echo "$counters" | grep -o 'passed="[0-9]*"' | grep -o '[0-9]*')
+          failed=$(echo "$counters" | grep -o 'failed="[0-9]*"' | grep -o '[0-9]*')
+          echo "::notice title=Tests::$passed of $total tests passed, $failed failed"
+          echo "### Tests: $passed / $total passed, $failed failed" >> "$GITHUB_STEP_SUMMARY"
