@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using OnlineChatWithSignalR.Common;
 using OnlineChatWithSignalR.Data;
 using OnlineChatWithSignalR.Hubs;
 using OnlineChatWithSignalR.Infrastructure;
@@ -27,9 +26,6 @@ app.MapGroup("/api/auth")
     .MapIdentityApi<ChatUser>();
 
 app.MapHub<ChatHub>(ChatHub.Path);
-
-// Original server-time demo, kept until the new chat UI replaces it
-app.MapHub<NotificationHub>("notificationHub");
 
 app.MapHealthChecks("/health");
 

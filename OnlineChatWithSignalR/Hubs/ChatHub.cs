@@ -4,21 +4,8 @@ using OnlineChatWithSignalR.Chat;
 
 namespace OnlineChatWithSignalR.Hubs;
 
-/// <summary>
-/// Methods the server can call on connected clients. Using a strongly typed
-/// interface means the compiler catches typos in client method names.
-/// </summary>
-public interface IChatClient
-{
-    Task ReceiveSystemMessage(string message);
-    Task ReceiveMessage(MessageDto message);
-    Task RoomCreated(RoomDto room);
-    Task UserJoinedRoom(Guid roomId, string userName);
-    Task UserLeftRoom(Guid roomId, string userName);
-}
-
 [Authorize]
-public sealed class ChatHub(ChatService chat, ILogger<ChatHub> logger) : Hub<IChatClient>
+public sealed class ChatHub(ChatService chat, ILogger<ChatHub> logger) : Hub<IChatClient>, IChatHub
 {
     public const string Path = "/hubs/chat";
 
