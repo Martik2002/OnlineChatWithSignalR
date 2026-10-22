@@ -1,0 +1,406 @@
+@page "/"
+@using Microsoft.AspNetCore.SignalR
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
+@inject AuthService Auth
+@inject ChatConnection Chat
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject ILogger<ChatPage> Logger
+
+<PageTitle>@(SelectedRoom?.Name ?? "Chat")</PageTitle>
+
+<header class="topbar">
+    <span class="brand">💬 Chat</span>
+    <span class="status status-@Chat.State.ToString().ToLowerInvariant()" title="Connection status">
+        @StatusText
+    </span>
+    <span class="ms-auto me-3 text-muted small">@Auth.Email</span>
+    <button class="btn btn-sm btn-outline-secondary" @onclick="LogoutAsync">Sign out</button>
+</header>
+
+@if (_error is not null)
+{
+    <div class="alert alert-warning alert-dismissible m-2 py-2" role="alert">
+        @_error
+        <button type="button" class="btn-close" @onclick="() => _error = null"></button>
+    </div>
+}
+
+<div class="chat">
+    <aside class="rooms">
+        <form class="new-room" @onsubmit="CreateRoomAsync" @onsubmit:preventDefault>
+            <input class="form-control form-control-sm" placeholder="New room name" @bind="_newRoomName" maxlength="100"/>
+            <button class="btn btn-sm btn-primary" type="submit" disabled="@string.IsNullOrWhiteSpace(_newRoomName)">+</button>
+        </form>
+
+        @if (_rooms.Count == 0)
+        {
+            <p class="text-muted small p-3">No rooms yet. Create the first one!</p>
+        }
+
+        @foreach (var room in _rooms)
+        {
+            <div class="room @(room.Id == _selectedRoomId ? "active" : "")">
+                @if (room.IsMember)
+                {
+                    <button class="room-link" @onclick="() => SelectRoomAsync(room.Id)">
+                        <span class="room-name"># @room.Name</span>
+                        <span class="room-meta">@room.MemberCount members</span>
+                    </button>
+                }
+                else
+                {
+                    <div class="room-link">
+                        <span class="room-name text-muted"># @room.Name</span>
+                        <span class="room-meta">@room.MemberCount members</span>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="() => JoinRoomAsync(room.Id)">Join</button>
+                }
+            </div>
+        }
+    </aside>
+
+    <section class="conversation">
+        @if (SelectedRoom is null || SelectedTimeline is null)
+        {
+            <div class="empty">Select or join a room to start chatting.</div>
+        }
+        else
+        {
+            <div class="conversation-header">
+                <h2 class="h6 m-0"># @SelectedRoom.Name</h2>
+                <button class="btn btn-sm btn-link text-danger" @onclick="() => LeaveRoomAsync(SelectedRoom.Id)">Leave</button>
+            </div>
+
+            <div class="messages" @ref="_messagesElement">
+                @if (SelectedTimeline.HasOlder)
+                {
+                    <div class="text-center my-2">
+                        <button class="btn btn-sm btn-light" @onclick="LoadOlderAsync" disabled="@_loadingOlder">
+                            @(_loadingOlder ? "Loading..." : "Load older messages")
+                        </button>
+                    </div>
+                }
+
+                @if (SelectedTimeline.Items.Count == 0)
+                {
+                    <div class="empty">No messages yet. Say hello! 👋</div>
+                }
+
+                @foreach (var item in SelectedTimeline.Items)
+                {
+                    <div class="message @(item.IsOwn ? "own" : "") @item.Status.ToString().ToLowerInvariant()" @key="item.Id">
+                        @if (!item.IsOwn)
+                        {
+                            <div class="sender">@item.SenderName</div>
+                        }
+                        @* Blazor HTML-encodes text output, so message content can't inject markup *@
+                        <div class="bubble">@item.Content</div>
+                        <div class="meta">
+                            @switch (item.Status)
+                            {
+                                case ChatItemStatus.Pending:
+                                    <span>sending...</span>
+                                    break;
+                                case ChatItemStatus.Failed:
+                                    <span class="text-danger">not sent · will retry</span>
+                                    break;
+                                default:
+                                    <span>@item.SentAt?.ToLocalTime().ToString("HH:mm")</span>
+                                    break;
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <form class="composer" @onsubmit="SendAsync" @onsubmit:preventDefault>
+                <input class="form-control" placeholder="Message # @SelectedRoom.Name" @bind="_draft"
+                       @bind:event="oninput" maxlength="2000" autocomplete="off"/>
+                <button class="btn btn-primary" type="submit" disabled="@string.IsNullOrWhiteSpace(_draft)">Send</button>
+            </form>
+        }
+    </section>
+</div>
+
+@code {
+    private readonly Dictionary<Guid, RoomTimeline> _timelines = [];
+    private List<RoomDto> _rooms = [];
+    private Guid? _selectedRoomId;
+    private string _draft = string.Empty;
+    private string _newRoomName = string.Empty;
+    private string? _error;
+    private bool _loadingOlder;
+    private bool _scrollToBottom;
+    private ElementReference _messagesElement;
+
+    private RoomDto? SelectedRoom => _rooms.FirstOrDefault(r => r.Id == _selectedRoomId);
+
+    private RoomTimeline? SelectedTimeline =>
+        _selectedRoomId is { } id && _timelines.TryGetValue(id, out var timeline) ? timeline : null;
+
+    private string StatusText => Chat.State switch
+    {
+        HubConnectionState.Connected => "Connected",
+        HubConnectionState.Connecting => "Connecting...",
+        HubConnectionState.Reconnecting => "Reconnecting...",
+        _ => "Offline"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.EnsureLoadedAsync();
+        if (!Auth.IsLoggedIn)
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+
+        Chat.MessageReceived += OnMessageReceived;
+        Chat.RoomCreated += OnRoomCreated;
+        Chat.MembershipChanged += OnMembershipChanged;
+        Chat.StateChanged += OnStateChanged;
+        Chat.Reconnected += OnReconnected;
+
+        try
+        {
+            await Chat.StartAsync();
+            await LoadRoomsAsync();
+
+            var firstJoined = _rooms.FirstOrDefault(r => r.IsMember);
+            if (firstJoined is not null)
+            {
+                await SelectRoomAsync(firstJoined.Id);
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            Logger.LogWarning(ex, "Could not connect to the chat hub");
+            _error = "Can't connect to the chat server. Is the API running?";
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_scrollToBottom && SelectedTimeline is not null)
+        {
+            _scrollToBottom = false;
+            await JS.InvokeVoidAsync("chat.scrollToBottom", _messagesElement);
+        }
+    }
+
+    private async Task LoadRoomsAsync()
+    {
+        _rooms = (await Chat.GetRoomsAsync())
+            .OrderByDescending(r => r.IsMember)
+            .ThenBy(r => r.Name)
+            .ToList();
+    }
+
+    private async Task SelectRoomAsync(Guid roomId)
+    {
+        _selectedRoomId = roomId;
+
+        if (!_timelines.TryGetValue(roomId, out var timeline))
+        {
+            timeline = new RoomTimeline(Auth.Email ?? string.Empty);
+            _timelines[roomId] = timeline;
+        }
+
+        if (!timeline.IsLoaded)
+        {
+            await RunAsync(async () => timeline.LoadLatest(await Chat.GetMessagesAsync(new GetMessagesRequest(roomId))));
+        }
+
+        _scrollToBottom = true;
+    }
+
+    private async Task CreateRoomAsync()
+    {
+        var name = _newRoomName.Trim();
+        if (name.Length == 0)
+        {
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            var room = await Chat.CreateRoomAsync(name);
+            _newRoomName = string.Empty;
+            await LoadRoomsAsync();
+            await SelectRoomAsync(room.Id);
+        });
+    }
+
+    private Task JoinRoomAsync(Guid roomId) => RunAsync(async () =>
+    {
+        await Chat.JoinRoomAsync(roomId);
+        await LoadRoomsAsync();
+        await SelectRoomAsync(roomId);
+    });
+
+    private Task LeaveRoomAsync(Guid roomId) => RunAsync(async () =>
+    {
+        await Chat.LeaveRoomAsync(roomId);
+        _timelines.Remove(roomId);
+        _selectedRoomId = null;
+        await LoadRoomsAsync();
+    });
+
+    private async Task LoadOlderAsync()
+    {
+        if (_selectedRoomId is not { } roomId || SelectedTimeline is not { } timeline)
+        {
+            return;
+        }
+
+        _loadingOlder = true;
+        await RunAsync(async () =>
+            timeline.AddOlder(await Chat.GetMessagesAsync(new GetMessagesRequest(roomId, timeline.OldestSequence))));
+        _loadingOlder = false;
+    }
+
+    private async Task SendAsync()
+    {
+        var content = _draft;
+        if (string.IsNullOrWhiteSpace(content) || _selectedRoomId is not { } roomId || SelectedTimeline is not { } timeline)
+        {
+            return;
+        }
+
+        // Optimistic UI: show the message right away. The id is generated here, on the client,
+        // so if the send has to be retried the server recognizes it and doesn't save it twice.
+        var item = timeline.AddPending(Guid.NewGuid(), content);
+        _draft = string.Empty;
+        _scrollToBottom = true;
+
+        await TrySendAsync(roomId, timeline, item);
+    }
+
+    private async Task TrySendAsync(Guid roomId, RoomTimeline timeline, ChatItem item)
+    {
+        try
+        {
+            var saved = await Chat.SendMessageAsync(new SendMessageRequest(item.Id, roomId, item.Content));
+            timeline.Upsert(saved);
+        }
+        catch (HubException ex)
+        {
+            // Rejected by the server (validation, not a member): retrying won't help
+            timeline.MarkFailed(item.Id);
+            _error = CleanHubError(ex);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or TaskCanceledException)
+        {
+            // Connection problem: keep the message and resend it after reconnecting
+            Logger.LogInformation(ex, "Sending failed, will retry after reconnect");
+            timeline.MarkFailed(item.Id);
+        }
+    }
+
+    private Task OnMessageReceived(MessageDto message) => InvokeAsync(async () =>
+    {
+        if (!_timelines.TryGetValue(message.RoomId, out var timeline) || !timeline.IsLoaded)
+        {
+            return;
+        }
+
+        var isSelected = message.RoomId == _selectedRoomId && SelectedRoom is not null;
+        var wasNearBottom = isSelected && await JS.InvokeAsync<bool>("chat.isNearBottom", _messagesElement);
+
+        if (timeline.Upsert(message) && wasNearBottom)
+        {
+            // Only auto-scroll if the user is reading the newest messages, not scrolled up in history
+            _scrollToBottom = true;
+        }
+
+        StateHasChanged();
+    });
+
+    private Task OnRoomCreated(RoomDto room) => InvokeAsync(() =>
+    {
+        if (_rooms.All(r => r.Id != room.Id))
+        {
+            _rooms.Add(room);
+            StateHasChanged();
+        }
+    });
+
+    private Task OnMembershipChanged(Guid roomId, string userName) => InvokeAsync(async () =>
+    {
+        await RunAsync(LoadRoomsAsync);
+        StateHasChanged();
+    });
+
+    private Task OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>
+    /// After a reconnect: fetch messages that arrived while we were offline, then resend
+    /// messages that were not confirmed. Resending is safe because sending is idempotent.
+    /// </summary>
+    private Task OnReconnected() => InvokeAsync(async () =>
+    {
+        await RunAsync(async () =>
+        {
+            await LoadRoomsAsync();
+
+            foreach (var (roomId, timeline) in _timelines.Where(t => t.Value.IsLoaded).ToList())
+            {
+                timeline.CatchUp(await Chat.GetMessagesAsync(new GetMessagesRequest(roomId)));
+
+                foreach (var item in timeline.Unconfirmed)
+                {
+                    timeline.MarkPending(item.Id);
+                    await TrySendAsync(roomId, timeline, item);
+                }
+            }
+        });
+
+        _scrollToBottom = true;
+        StateHasChanged();
+    });
+
+    private async Task LogoutAsync()
+    {
+        await Chat.StopAsync();
+        await Auth.LogoutAsync();
+        Navigation.NavigateTo("/login");
+    }
+
+    /// <summary>Runs a hub call and shows a readable error instead of crashing the page.</summary>
+    private async Task RunAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (HubException ex)
+        {
+            _error = CleanHubError(ex);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or TaskCanceledException)
+        {
+            Logger.LogInformation(ex, "Hub call failed because the connection is not available");
+            _error = "You're offline. Reconnecting...";
+        }
+    }
+
+    // SignalR prefixes the server's message with technical details; show only the message itself
+    private static string CleanHubError(HubException ex)
+    {
+        const string marker = "HubException: ";
+        var index = ex.Message.IndexOf(marker, StringComparison.Ordinal);
+        return index >= 0 ? ex.Message[(index + marker.Length)..] : ex.Message;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        Chat.MessageReceived -= OnMessageReceived;
+        Chat.RoomCreated -= OnRoomCreated;
+        Chat.MembershipChanged -= OnMembershipChanged;
+        Chat.StateChanged -= OnStateChanged;
+        Chat.Reconnected -= OnReconnected;
+        return ValueTask.CompletedTask;
+    }
+}

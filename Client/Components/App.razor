@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -10,12 +10,24 @@
     <link rel="stylesheet" href="@Assets["Client.styles.css"]"/>
     <ImportMap/>
     <link rel="icon" type="image/png" href="favicon.png"/>
-    <HeadOutlet/>
+    <HeadOutlet @rendermode="PageRenderMode"/>
 </head>
 
 <body>
-<Routes/>
+<Routes @rendermode="PageRenderMode"/>
 <script src="_framework/blazor.web.js"></script>
+<script src="@Assets["js/chat.js"]"></script>
 </body>
 
 </html>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    // Interactive everywhere, without prerendering: the pages read tokens from encrypted
+    // browser storage, which is only available once the interactive circuit is running.
+    // Pages marked [ExcludeFromInteractiveRouting] (the error page) stay static.
+    private IComponentRenderMode? PageRenderMode =>
+        HttpContext.AcceptsInteractiveRouting() ? new InteractiveServerRenderMode(prerender: false) : null;
+}
