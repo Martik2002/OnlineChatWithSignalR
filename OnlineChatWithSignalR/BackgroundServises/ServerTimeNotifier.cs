@@ -17,8 +17,8 @@ public class ServerTimeNotifier(
         while (!stoppingToken.IsCancellationRequested && await timer.WaitForNextTickAsync(stoppingToken))
         {
             var dateTime = DateTime.Now;
-            logger.LogInformation($"Executing {nameof(ServerTimeNotifier)} {dateTime}");
-           await hubContext.Clients.All.ReceiveNotification($"Server time: {dateTime}");
+            logger.LogInformation("Executing {Service} {Time}", nameof(ServerTimeNotifier), dateTime);
+            await hubContext.Clients.All.ReceiveNotification($"Server time: {dateTime}");
         }
     }
 }

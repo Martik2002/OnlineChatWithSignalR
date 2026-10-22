@@ -7,8 +7,8 @@ public class NotificationHub : Hub<INotificationClient>
 {
     public override async Task OnConnectedAsync()
     {
-         await Clients.Clients(Context.ConnectionId).ReceiveNotification(
-            $"Thank you connecting {Context.User?.Identity?.Name}");
+        await Clients.Caller.ReceiveNotification(
+            $"Thank you for connecting {Context.User?.Identity?.Name}".TrimEnd());
          await base.OnConnectedAsync();
     }
 }
