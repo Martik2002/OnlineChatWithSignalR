@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using OnlineChatWithSignalR.BackgroundServises;
+using OnlineChatWithSignalR.Chat;
 using OnlineChatWithSignalR.Data;
 using OnlineChatWithSignalR.Hubs;
 
@@ -53,7 +54,10 @@ public static class ServiceCollectionExtensions
 
         services.AddAuthorization();
 
-        services.AddSignalR();
+        services.AddSingleton(TimeProvider.System);
+        services.AddScoped<ChatService>();
+
+        services.AddSignalR(options => options.AddFilter<ChatExceptionHubFilter>());
         services.AddHostedService<ServerTimeNotifier>();
 
         services.AddProblemDetails();

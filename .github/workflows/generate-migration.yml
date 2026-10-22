@@ -1,0 +1,31 @@
+name: Generate migration
+
+on:
+  push:
+    branches: [ feature/rooms-and-messages ]
+
+permissions:
+  contents: write
+
+jobs:
+  migration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Generate migration
+        if: hashFiles('OnlineChatWithSignalR/Migrations/*_AddRoomsAndMessages.cs') == ''
+        env:
+          ConnectionStrings__Chat: "Host=localhost;Database=design;Username=postgres;Password=postgres"
+        run: |
+          dotnet tool install --global dotnet-ef --version 9.0.8
+          dotnet ef migrations add AddRoomsAndMessages --project OnlineChatWithSignalR/OnlineChatWithSignalR.csproj --output-dir Migrations
+          git config user.name "Martik"
+          git config user.email "avagyanmartik05@gmail.com"
+          git add OnlineChatWithSignalR/Migrations
+          git commit -m "feat: add migration for rooms and messages"
+          git push

@@ -73,6 +73,16 @@ public sealed class ChatApiFactory : WebApplicationFactory<Program>, IAsyncLifet
             .Build();
     }
 
+    /// <summary>Creates a new user and returns a started hub connection for it.</summary>
+    public async Task<ChatTestClient> ConnectNewUserAsync()
+    {
+        var (email, token) = await CreateUserAsync();
+        var connection = CreateHubConnection(token);
+        var client = new ChatTestClient(email, token, connection);
+        await connection.StartAsync();
+        return client;
+    }
+
     private sealed record LoginResponse(string AccessToken, string RefreshToken, int ExpiresIn);
 }
 
