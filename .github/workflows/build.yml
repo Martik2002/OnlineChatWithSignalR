@@ -22,7 +22,12 @@ jobs:
         run: dotnet restore OnlineChatWithSignalR.sln
 
       - name: Build
-        run: dotnet build OnlineChatWithSignalR.sln --no-restore --configuration Release
+        run: |
+          set -o pipefail
+          dotnet build OnlineChatWithSignalR.sln --no-restore --configuration Release 2>&1 | tee build.log || {
+            grep -E 'error [A-Z]+[0-9]+' build.log | sort -u | head -30 | while read -r line; do echo "::error title=Build::$line"; done
+            exit 1
+          }
 
       # Integration tests start PostgreSQL in Docker via Testcontainers
       - name: Test

@@ -14,6 +14,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{C63907E5
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OnlineChatWithSignalR.Tests", "tests\OnlineChatWithSignalR.Tests\OnlineChatWithSignalR.Tests.csproj", "{981DC80C-5677-4C1B-84D9-F88F7AAF3E14}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OnlineChatWithSignalR.Contracts", "OnlineChatWithSignalR.Contracts\OnlineChatWithSignalR.Contracts.csproj", "{1FA5F453-8AA5-4CD0-8BE4-EE32C8EEF378}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Client.Tests", "tests\Client.Tests\Client.Tests.csproj", "{10289CFA-9E7A-4F45-A466-DAC79E8A0FA4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -32,8 +36,17 @@ Global
 		{981DC80C-5677-4C1B-84D9-F88F7AAF3E14}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{981DC80C-5677-4C1B-84D9-F88F7AAF3E14}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{981DC80C-5677-4C1B-84D9-F88F7AAF3E14}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1FA5F453-8AA5-4CD0-8BE4-EE32C8EEF378}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1FA5F453-8AA5-4CD0-8BE4-EE32C8EEF378}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1FA5F453-8AA5-4CD0-8BE4-EE32C8EEF378}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1FA5F453-8AA5-4CD0-8BE4-EE32C8EEF378}.Release|Any CPU.Build.0 = Release|Any CPU
+		{10289CFA-9E7A-4F45-A466-DAC79E8A0FA4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{10289CFA-9E7A-4F45-A466-DAC79E8A0FA4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{10289CFA-9E7A-4F45-A466-DAC79E8A0FA4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{10289CFA-9E7A-4F45-A466-DAC79E8A0FA4}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{981DC80C-5677-4C1B-84D9-F88F7AAF3E14} = {C63907E5-49F1-4A7C-9D4F-46B619337207}
+		{10289CFA-9E7A-4F45-A466-DAC79E8A0FA4} = {C63907E5-49F1-4A7C-9D4F-46B619337207}
 	EndGlobalSection
 EndGlobal
