@@ -1,5 +1,7 @@
 # OnlineChatWithSignalR
 
+[![Build](https://github.com/Martik2002/OnlineChatWithSignalR/actions/workflows/build.yml/badge.svg)](https://github.com/Martik2002/OnlineChatWithSignalR/actions/workflows/build.yml)
+
 Real-time server-to-client messaging with **ASP.NET Core SignalR** and a **Blazor** client. The server pushes notifications to every connected client without polling, which is the foundation for features like live chat, alerts and dashboards.
 
 ## How it works
