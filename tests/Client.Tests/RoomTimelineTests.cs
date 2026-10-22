@@ -103,10 +103,12 @@ public sealed class RoomTimelineTests
     public void CatchUp_OverlappingPage_MergesMissedMessages()
     {
         var timeline = new RoomTimeline(Me);
-        timeline.LoadLatest(Page(hasMore: true, Message(10), Message(12)));
+        var message12 = Message(12);
+        timeline.LoadLatest(Page(hasMore: true, Message(10), message12));
 
-        // While offline, messages 14 and 17 were sent. The latest page overlaps with ours.
-        timeline.CatchUp(Page(hasMore: true, Message(12), Message(14), Message(17)));
+        // While offline, messages 14 and 17 were sent. The latest page overlaps with ours
+        // (message 12 comes back with the same id, as it would from the server).
+        timeline.CatchUp(Page(hasMore: true, message12, Message(14), Message(17)));
 
         Assert.Equal(new long?[] { 10, 12, 14, 17 }, timeline.Items.Select(i => i.Sequence));
         Assert.True(timeline.HasOlder);
