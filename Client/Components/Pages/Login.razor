@@ -1,0 +1,93 @@
+@page "/login"
+@inject AuthService Auth
+@inject NavigationManager Navigation
+
+<PageTitle>Sign in · Chat</PageTitle>
+
+<div class="login">
+    <div class="card login-card shadow-sm">
+        <div class="card-body p-4">
+            <h1 class="h4 mb-1">@(_isRegister ? "Create an account" : "Welcome back")</h1>
+            <p class="text-muted mb-4">@(_isRegister ? "Join the conversation." : "Sign in to continue chatting.")</p>
+
+            <form @onsubmit="SubmitAsync" @onsubmit:preventDefault>
+                <div class="mb-3">
+                    <label class="form-label" for="email">Email</label>
+                    <input id="email" type="email" class="form-control" @bind="_email" autocomplete="email" required/>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="password">Password</label>
+                    <input id="password" type="password" class="form-control" @bind="_password"
+                           autocomplete="@(_isRegister ? "new-password" : "current-password")" required/>
+                    @if (_isRegister)
+                    {
+                        <div class="form-text">At least 8 characters, with upper and lower case letters, a digit and a symbol.</div>
+                    }
+                </div>
+
+                @if (_error is not null)
+                {
+                    <div class="alert alert-danger py-2" role="alert">@_error</div>
+                }
+
+                <button type="submit" class="btn btn-primary w-100" disabled="@_busy">
+                    @(_busy ? "Please wait..." : _isRegister ? "Create account" : "Sign in")
+                </button>
+            </form>
+
+            <div class="text-center mt-3">
+                <button type="button" class="btn btn-link p-0" @onclick="ToggleMode">
+                    @(_isRegister ? "Already have an account? Sign in" : "New here? Create an account")
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _email = string.Empty;
+    private string _password = string.Empty;
+    private string? _error;
+    private bool _busy;
+    private bool _isRegister;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.EnsureLoadedAsync();
+        if (Auth.IsLoggedIn)
+        {
+            Navigation.NavigateTo("/");
+        }
+    }
+
+    private void ToggleMode()
+    {
+        _isRegister = !_isRegister;
+        _error = null;
+    }
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            _error = _isRegister
+                ? await Auth.RegisterAsync(_email, _password)
+                : await Auth.LoginAsync(_email, _password);
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Can't reach the chat server. Is the API running?";
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        if (_error is null)
+        {
+            Navigation.NavigateTo("/");
+        }
+    }
+}

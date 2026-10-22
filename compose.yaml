@@ -35,6 +35,9 @@ services:
     build:
       context: .
       dockerfile: Client/Dockerfile
+    environment:
+      # Inside Docker the client reaches the API by its service name
+      ChatApi__BaseUrl: "http://onlinechatwithsignalr:8080"
     ports:
       - "5062:8080"
     depends_on:
