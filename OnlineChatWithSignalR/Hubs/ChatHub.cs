@@ -5,8 +5,11 @@ using OnlineChatWithSignalR.Chat;
 namespace OnlineChatWithSignalR.Hubs;
 
 [Authorize]
-public sealed class ChatHub(ChatService chat, PresenceTracker presence, ILogger<ChatHub> logger)
-    : Hub<IChatClient>, IChatHub
+public sealed class ChatHub(
+    ChatService chat,
+    IPresenceTracker presence,
+    MessageRateLimiter rateLimiter,
+    ILogger<ChatHub> logger) : Hub<IChatClient>, IChatHub
 {
     public const string Path = "/hubs/chat";
 
@@ -23,24 +26,46 @@ public sealed class ChatHub(ChatService chat, PresenceTracker presence, ILogger<
 
         // Track the connection before adding groups: a JoinRoom from another tab running at the
         // same time then already sees this connection and adds it to the new room too.
-        var cameOnline = presence.Connected(User.Id, Context.ConnectionId);
+        var cameOnline = await presence.ConnectedAsync(User.Id, Context.ConnectionId);
 
-        // Group membership belongs to a connection, not to a user, and is lost when the
-        // connection closes. So on every (re)connect, add this connection to all rooms
-        // the user is a member of.
-        var roomIds = await chat.GetRoomIdsOfUserAsync(User.Id, Context.ConnectionAborted);
-        foreach (var roomId in roomIds)
+        try
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, RoomGroup(roomId), Context.ConnectionAborted);
-        }
+            // Group membership belongs to a connection, not to a user, and is lost when the
+            // connection closes. So on every (re)connect, add this connection to all rooms
+            // the user is a member of.
+            var roomIds = await chat.GetRoomIdsOfUserAsync(User.Id, Context.ConnectionAborted);
+            foreach (var roomId in roomIds)
+            {
+                await Groups.AddToGroupAsync(Context.ConnectionId, RoomGroup(roomId), Context.ConnectionAborted);
+            }
 
-        if (cameOnline)
+            if (cameOnline)
+            {
+                await NotifyPresenceAsync(roomIds, isOnline: true);
+            }
+
+            await Clients.Caller.ReceiveSystemMessage($"Welcome, {User.Name}!");
+            await base.OnConnectedAsync();
+        }
+        catch
         {
-            await NotifyPresenceAsync(roomIds, isOnline: true);
-        }
+            // When OnConnectedAsync throws, SignalR never calls OnDisconnectedAsync for this
+            // connection. A typical cause: the client closes the tab while the connection is still
+            // being set up, which cancels ConnectionAborted. Without this rollback the connection
+            // would stay registered and the user would appear online forever.
+            try
+            {
+                await MarkDisconnectedAsync();
+            }
+            catch (Exception rollbackError)
+            {
+                // Don't hide the original error; presence of this connection expires via the heartbeat timeout
+                logger.LogWarning(rollbackError, "Could not roll back presence for connection {ConnectionId}",
+                    Context.ConnectionId);
+            }
 
-        await Clients.Caller.ReceiveSystemMessage($"Welcome, {User.Name}!");
-        await base.OnConnectedAsync();
+            throw;
+        }
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
@@ -48,15 +73,19 @@ public sealed class ChatHub(ChatService chat, PresenceTracker presence, ILogger<
         logger.LogInformation("User {UserId} disconnected ({ConnectionId})",
             Context.UserIdentifier, Context.ConnectionId);
 
+        await MarkDisconnectedAsync();
+        await base.OnDisconnectedAsync(exception);
+    }
+
+    private async Task MarkDisconnectedAsync()
+    {
         // Offline only when the last tab/device disconnects
-        if (presence.Disconnected(User.Id, Context.ConnectionId))
+        if (await presence.DisconnectedAsync(User.Id, Context.ConnectionId))
         {
             // ConnectionAborted is already cancelled at this point, so don't pass it
             var roomIds = await chat.GetRoomIdsOfUserAsync(User.Id, CancellationToken.None);
             await NotifyPresenceAsync(roomIds, isOnline: false);
         }
-
-        await base.OnDisconnectedAsync(exception);
     }
 
     /// <summary>Returns the name of the authenticated user. Useful to verify a connection.</summary>
@@ -94,8 +123,9 @@ public sealed class ChatHub(ChatService chat, PresenceTracker presence, ILogger<
     {
         var left = await chat.LeaveRoomAsync(User, roomId, Context.ConnectionAborted);
 
-        foreach (var connectionId in ConnectionsOfCurrentUser())
+        foreach (var connectionId in await ConnectionsOfCurrentUserAsync())
         {
+            // With the Redis backplane this also works for connections on other servers
             await Groups.RemoveFromGroupAsync(connectionId, RoomGroup(roomId));
         }
 
@@ -109,6 +139,11 @@ public sealed class ChatHub(ChatService chat, PresenceTracker presence, ILogger<
 
     public async Task<MessageDto> SendMessage(SendMessageRequest request)
     {
+        if (!rateLimiter.TryAcquire(User.Id))
+        {
+            throw new ChatException("You're sending messages too fast. Please wait a moment.");
+        }
+
         var (message, isNew) = await chat.SendMessageAsync(User, request, Context.ConnectionAborted);
 
         // A retried send returns the saved message without broadcasting it again
@@ -127,8 +162,11 @@ public sealed class ChatHub(ChatService chat, PresenceTracker presence, ILogger<
     {
         var members = await chat.GetMembersAsync(User, roomId, Context.ConnectionAborted);
 
+        // Checked in parallel: with Redis the calls are pipelined into few round trips
+        var online = await Task.WhenAll(members.Select(m => presence.IsOnlineAsync(m.UserId)));
+
         return members
-            .Select(m => new RoomMemberDto(m.UserId, m.UserName, presence.IsOnline(m.UserId)))
+            .Select((m, i) => new RoomMemberDto(m.UserId, m.UserName, online[i]))
             .OrderByDescending(m => m.IsOnline)
             .ThenBy(m => m.UserName)
             .ToList();
@@ -162,12 +200,16 @@ public sealed class ChatHub(ChatService chat, PresenceTracker presence, ILogger<
 
     private async Task AddUserConnectionsToGroupAsync(Guid roomId)
     {
-        foreach (var connectionId in ConnectionsOfCurrentUser())
+        foreach (var connectionId in await ConnectionsOfCurrentUserAsync())
         {
+            // With the Redis backplane this also works for connections on other servers
             await Groups.AddToGroupAsync(connectionId, RoomGroup(roomId));
         }
     }
 
-    private IEnumerable<string> ConnectionsOfCurrentUser() =>
-        presence.GetConnections(User.Id).Append(Context.ConnectionId).Distinct();
+    private async Task<IReadOnlyList<string>> ConnectionsOfCurrentUserAsync()
+    {
+        var connections = await presence.GetConnectionsAsync(User.Id);
+        return connections.Append(Context.ConnectionId).Distinct().ToList();
+    }
 }
