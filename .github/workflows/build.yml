@@ -42,8 +42,7 @@ jobs:
             total=$((total + $(echo "$counters" | grep -o ' total="[0-9]*"' | grep -o '[0-9]*')))
             passed=$((passed + $(echo "$counters" | grep -o ' passed="[0-9]*"' | grep -o '[0-9]*')))
             failed=$((failed + $(echo "$counters" | grep -o ' failed="[0-9]*"' | grep -o '[0-9]*')))
-            grep -o '<UnitTestResult [^>]*outcome="Failed"[^>]*>' "$file" | grep -o 'testName="[^"]*"' | head -20 \
-              | while read -r test; do echo "::error title=Failed test::$test"; done
+            python3 .github/scripts/report_failures.py "$file"
           done
           echo "::notice title=Tests::$passed of $total tests passed, $failed failed"
           echo "### Tests: $passed / $total passed, $failed failed" >> "$GITHUB_STEP_SUMMARY"
