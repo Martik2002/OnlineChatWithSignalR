@@ -2,7 +2,7 @@
 
 [![Build](https://github.com/Martik2002/OnlineChatWithSignalR/actions/workflows/build.yml/badge.svg)](https://github.com/Martik2002/OnlineChatWithSignalR/actions/workflows/build.yml)
 
-A real-time chat built with **ASP.NET Core SignalR**, **Blazor** and **PostgreSQL**. Users sign up, create or join rooms, and chat live. Messages are saved, history loads page by page, and the client survives network drops without losing or duplicating messages.
+A real-time chat built with **ASP.NET Core SignalR**, **Blazor**, **PostgreSQL** and **Redis**. Users sign up, create or join rooms, and chat live. Messages are saved, history loads page by page, the client survives network drops without losing or duplicating messages, and the API scales out to several instances behind a load balancer.
 
 ## Features
 
@@ -13,23 +13,27 @@ A real-time chat built with **ASP.NET Core SignalR**, **Blazor** and **PostgreSQ
 - 🟢 Online members per room and "is typing..." indicators
 - 🧾 **Idempotent sending**: client-generated message ids, so a retry never creates a duplicate
 - 📜 Cursor-based paging through history ("load older messages")
-- 🧪 Integration tests with real SignalR connections and PostgreSQL (Testcontainers), unit tests for the client logic
+- 🌐 **Horizontal scale-out**: several API instances behind a load balancer, connected through a Redis backplane
+- 🛡️ Per-user message rate limiting
+- 🧪 Integration tests with real SignalR connections, PostgreSQL and Redis (Testcontainers), including two API instances in one test
 
 ## Architecture
 
 ```
-┌──────────────────────────┐   SignalR (WebSocket)   ┌────────────────────────────┐
-│  Client (Blazor Server)  │ ──────────────────────▶ │  API (ASP.NET Core)        │
-│                          │   + REST for auth       │                            │
-│  Login, rooms, messages  │ ◀────────────────────── │  ChatHub  →  ChatService   │
-│  RoomTimeline (merging)  │   pushed messages       │  Identity API endpoints    │
-└──────────────────────────┘                         └─────────────┬──────────────┘
-              ▲                                                    │ EF Core
-              │ shared DTOs + hub interfaces                       ▼
-   ┌──────────┴───────────────────┐                        ┌──────────────┐
-   │ OnlineChatWithSignalR.       │                        │  PostgreSQL  │
-   │ Contracts                    │                        └──────────────┘
-   └──────────────────────────────┘
+                                                     ┌───────────────────────────┐
+┌─────────────────────────┐    ┌────────────────┐    │  API instance 1           │
+│  Client (Blazor Server) │    │                │ ──▶│  ChatHub → ChatService    │──┐
+│                         │───▶│     nginx      │    └─────────────┬─────────────┘  │
+│  Login, rooms, messages │ WS │  round robin   │                  │ pub/sub        │ EF Core
+│  RoomTimeline, typing   │    │                │    ┌─────────────▼─────────────┐  │
+└─────────────────────────┘    │                │ ──▶│  Redis                    │  │
+                               └────────────────┘    │  backplane · presence ·   │  │
+                                        │            │  Data Protection keys     │  │
+                                        │            └─────────────▲─────────────┘  │
+                                        │                          │ pub/sub        ▼
+                                        │            ┌─────────────┴─────────────┐ ┌────────────┐
+                                        └───────────▶│  API instance 2           │▶│ PostgreSQL │
+                                                     └───────────────────────────┘ └────────────┘
 ```
 
 | Project | Purpose |
@@ -37,7 +41,8 @@ A real-time chat built with **ASP.NET Core SignalR**, **Blazor** and **PostgreSQ
 | `OnlineChatWithSignalR` | API: Identity endpoints, `ChatHub`, `ChatService`, EF Core and migrations |
 | `OnlineChatWithSignalR.Contracts` | DTOs and the `IChatHub` / `IChatClient` interfaces shared by server and client |
 | `Client` | Blazor Server UI |
-| `tests/OnlineChatWithSignalR.Tests` | Integration tests (real hub connections + PostgreSQL) |
+| `tests/OnlineChatWithSignalR.Tests` | Integration tests (real hub connections, PostgreSQL, Redis, two API instances) |
+| `deploy/nginx.conf` | Load balancer for the two API instances in Docker Compose |
 | `tests/Client.Tests` | Unit tests for the client's message merging logic |
 
 ## Design Decisions
@@ -51,19 +56,27 @@ A real-time chat built with **ASP.NET Core SignalR**, **Blazor** and **PostgreSQ
 - **Presence counts connections, not users.** A user is online while at least one tab or device is connected, so closing one of several tabs doesn't mark them offline. Presence changes are only sent to users who share a room with them.
 - **Typing signals expire instead of being cancelled.** The client sends at most one "typing" signal every 2 seconds, and receivers hide it after 4 seconds without a new one. There is no "stopped typing" message that could get lost and leave the indicator stuck.
 - **Room membership applies to all tabs.** Joining or leaving a room in one tab updates the SignalR groups of all the user's connections.
+- **Scale-out with a Redis backplane.** Each API instance only holds its own connections. The backplane publishes every message, group change and user message through Redis, so a message sent on instance 1 reaches users connected to instance 2.
+- **Shared Data Protection keys.** Identity bearer tokens are encrypted with Data Protection keys. With per-server keys, a token issued by one instance is rejected by the others, so the keys are stored in Redis.
+- **No sticky sessions.** SignalR normally sends a `negotiate` request first, and the real connection must reach the same server. The client goes straight to WebSockets (`SkipNegotiation`), a single request that any instance can accept, so the load balancer can use plain round robin.
+- **Presence in Redis with heartbeats.** Connections are stored per user in a Redis sorted set, scored by "last seen". Each instance refreshes its connections every 30 seconds, and entries older than 90 seconds are ignored, so users of a crashed instance don't stay "online" forever. Adding a connection and counting the rest runs as one atomic Lua script.
+- **Rate limiting per user, per instance.** A sliding window limits messages per user (20 per 10 seconds). HTTP rate limiting can't do this: a SignalR connection is one long request with many invocations inside. The counters are kept in memory, so with N instances the effective limit is up to N times higher, an accepted trade-off to avoid a Redis round trip per message.
+- **One migrator.** Only one instance applies database migrations at startup, so two instances never race to migrate.
 - **Thin hub, testable logic.** `ChatService` holds the server logic and `RoomTimeline` the client's merge rules, both independent of SignalR and the UI.
 
 ## Running Locally
 
-**Requirements:** .NET 9 SDK and PostgreSQL (or Docker).
+**Requirements:** .NET 9 SDK and PostgreSQL (or Docker). Redis is optional: without `ConnectionStrings:Redis` the API runs as a single instance with in-memory presence.
 
-### Option 1: Docker Compose (everything in containers)
+### Option 1: Docker Compose (two API instances, like production)
 
 ```bash
 docker compose up --build
 ```
 
-Open the client at http://localhost:5062.
+This starts PostgreSQL, Redis, **two API instances** (`api-1`, `api-2`), an nginx load balancer and the client. Open the client at http://localhost:5062, then sign in as two users in two browsers: their connections are spread over both instances by the load balancer, and messages still reach everyone.
+
+To see the scale-out in action, stop one instance with `docker compose stop api-2`. Users connected to it reconnect automatically to `api-1`, and the chat keeps working.
 
 ### Option 2: Run from your IDE
 
@@ -80,7 +93,7 @@ Open the client at http://localhost:5062.
 
 ### Tests
 
-Docker must be running: the integration tests start their own PostgreSQL container.
+Docker must be running: the integration tests start their own PostgreSQL and Redis containers.
 
 ```bash
 dotnet test
@@ -92,4 +105,4 @@ dotnet test
 - [x] Rooms and persistent messages
 - [x] Blazor chat UI
 - [x] Online users and "typing..." indicators
-- [ ] Scale-out with a Redis backplane and multiple API instances (#8)
+- [x] Scale-out with a Redis backplane and multiple API instances
