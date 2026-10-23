@@ -39,8 +39,23 @@ public sealed class PresenceTests(ChatApiFactory factory)
         var members = await alice.GetRoomMembersAsync(room.Id);
         Assert.True(members.Single(m => m.UserName == bob.Email).IsOnline);
 
-        // Closing the last tab makes the user offline
+        // Closing the last tab makes the user offline: first in the presence store...
         await bob.DisposeAsync();
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        var bobOnline = true;
+        while (bobOnline && DateTime.UtcNow < deadline)
+        {
+            members = await alice.GetRoomMembersAsync(room.Id);
+            bobOnline = members.Single(m => m.UserName == bob.Email).IsOnline;
+            if (bobOnline)
+            {
+                await Task.Delay(100);
+            }
+        }
+
+        Assert.False(bobOnline, "Presence store still reports bob online after both tabs closed");
+
+        // ...and then as an event to the other members
         await ChatTestClient.WaitUntilAsync(() =>
             alice.ReceivedPresence.Any(p => p.UserName == bob.Email && !p.IsOnline));
     }
