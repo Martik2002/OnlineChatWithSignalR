@@ -28,22 +28,44 @@ public sealed class ChatHub(
         // same time then already sees this connection and adds it to the new room too.
         var cameOnline = await presence.ConnectedAsync(User.Id, Context.ConnectionId);
 
-        // Group membership belongs to a connection, not to a user, and is lost when the
-        // connection closes. So on every (re)connect, add this connection to all rooms
-        // the user is a member of.
-        var roomIds = await chat.GetRoomIdsOfUserAsync(User.Id, Context.ConnectionAborted);
-        foreach (var roomId in roomIds)
+        try
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, RoomGroup(roomId), Context.ConnectionAborted);
-        }
+            // Group membership belongs to a connection, not to a user, and is lost when the
+            // connection closes. So on every (re)connect, add this connection to all rooms
+            // the user is a member of.
+            var roomIds = await chat.GetRoomIdsOfUserAsync(User.Id, Context.ConnectionAborted);
+            foreach (var roomId in roomIds)
+            {
+                await Groups.AddToGroupAsync(Context.ConnectionId, RoomGroup(roomId), Context.ConnectionAborted);
+            }
 
-        if (cameOnline)
+            if (cameOnline)
+            {
+                await NotifyPresenceAsync(roomIds, isOnline: true);
+            }
+
+            await Clients.Caller.ReceiveSystemMessage($"Welcome, {User.Name}!");
+            await base.OnConnectedAsync();
+        }
+        catch
         {
-            await NotifyPresenceAsync(roomIds, isOnline: true);
-        }
+            // When OnConnectedAsync throws, SignalR never calls OnDisconnectedAsync for this
+            // connection. A typical cause: the client closes the tab while the connection is still
+            // being set up, which cancels ConnectionAborted. Without this rollback the connection
+            // would stay registered and the user would appear online forever.
+            try
+            {
+                await MarkDisconnectedAsync();
+            }
+            catch (Exception rollbackError)
+            {
+                // Don't hide the original error; presence of this connection expires via the heartbeat timeout
+                logger.LogWarning(rollbackError, "Could not roll back presence for connection {ConnectionId}",
+                    Context.ConnectionId);
+            }
 
-        await Clients.Caller.ReceiveSystemMessage($"Welcome, {User.Name}!");
-        await base.OnConnectedAsync();
+            throw;
+        }
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
@@ -51,6 +73,12 @@ public sealed class ChatHub(
         logger.LogInformation("User {UserId} disconnected ({ConnectionId})",
             Context.UserIdentifier, Context.ConnectionId);
 
+        await MarkDisconnectedAsync();
+        await base.OnDisconnectedAsync(exception);
+    }
+
+    private async Task MarkDisconnectedAsync()
+    {
         // Offline only when the last tab/device disconnects
         if (await presence.DisconnectedAsync(User.Id, Context.ConnectionId))
         {
@@ -58,8 +86,6 @@ public sealed class ChatHub(
             var roomIds = await chat.GetRoomIdsOfUserAsync(User.Id, CancellationToken.None);
             await NotifyPresenceAsync(roomIds, isOnline: false);
         }
-
-        await base.OnDisconnectedAsync(exception);
     }
 
     /// <summary>Returns the name of the authenticated user. Useful to verify a connection.</summary>

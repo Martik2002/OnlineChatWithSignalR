@@ -61,6 +61,28 @@ public sealed class PresenceTests(ChatApiFactory factory)
     }
 
     [Fact]
+    public async Task TabsClosedWhileConnecting_DoNotKeepUserOnline()
+    {
+        // Regression test: closing a connection while the server is still running OnConnectedAsync
+        // used to leave it registered, so the user never went offline
+        await using var alice = await factory.ConnectNewUserAsync();
+        var bob = await factory.ConnectNewUserAsync();
+        var room = await alice.CreateRoomAsync();
+        await bob.JoinRoomAsync(room.Id);
+
+        for (var i = 0; i < 5; i++)
+        {
+            var tab = await factory.OpenTabAsync(bob);
+            await tab.DisposeAsync();
+        }
+
+        await bob.DisposeAsync();
+
+        await ChatTestClient.WaitUntilAsync(() =>
+            alice.ReceivedPresence.Any(p => p.UserName == bob.Email && !p.IsOnline));
+    }
+
+    [Fact]
     public async Task Presence_IsOnlySentToUsersWhoShareARoom()
     {
         await using var alice = await factory.ConnectNewUserAsync();
