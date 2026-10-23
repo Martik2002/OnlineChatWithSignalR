@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.SignalR.Client;
 using OnlineChatWithSignalR.Tests.Infrastructure;
 
 namespace OnlineChatWithSignalR.Tests;
