@@ -2,9 +2,9 @@ using OnlineChatWithSignalR.Chat;
 
 namespace OnlineChatWithSignalR.Tests;
 
-public sealed class PresenceTrackerTests
+public sealed class InMemoryPresenceTrackerTests
 {
-    private readonly PresenceTracker _tracker = new();
+    private readonly InMemoryPresenceTracker _tracker = new();
 
     [Fact]
     public void FirstConnection_ComesOnline_NextOnesDoNot()

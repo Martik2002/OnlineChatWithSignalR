@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Authentication.BearerToken;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using OnlineChatWithSignalR.Chat;
 using OnlineChatWithSignalR.Data;
 using OnlineChatWithSignalR.Hubs;
+using StackExchange.Redis;
 
 namespace OnlineChatWithSignalR.Infrastructure;
 
@@ -56,16 +58,66 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<ChatService>();
-        services.AddSingleton<PresenceTracker>();
 
-        services.AddSignalR(options => options.AddFilter<ChatExceptionHubFilter>());
+        services.Configure<MessageRateLimitOptions>(configuration.GetSection(MessageRateLimitOptions.Section));
+        services.AddSingleton<MessageRateLimiter>();
+
+        var signalR = services.AddSignalR(options => options.AddFilter<ChatExceptionHubFilter>());
 
         services.AddProblemDetails();
         services.AddOpenApi();
 
-        services.AddHealthChecks()
+        var healthChecks = services.AddHealthChecks()
             .AddDbContextCheck<ChatDbContext>();
 
+        var redisConnectionString = configuration.GetConnectionString("Redis");
+        if (string.IsNullOrWhiteSpace(redisConnectionString))
+        {
+            // Single instance: everything in memory
+            services.AddSingleton<IPresenceTracker, InMemoryPresenceTracker>();
+        }
+        else
+        {
+            services.AddRedisScaleOut(signalR, healthChecks, redisConnectionString);
+        }
+
         return services;
+    }
+
+    /// <summary>
+    /// Everything several API instances need to work as one chat:
+    /// <list type="bullet">
+    /// <item>SignalR backplane: a message sent on one server reaches connections on every server.</item>
+    /// <item>Presence in Redis, so every server sees every user's connections.</item>
+    /// <item>Shared Data Protection keys: Identity bearer tokens are encrypted with these keys,
+    /// so without sharing them a token issued by one server is rejected by the others.</item>
+    /// </list>
+    /// </summary>
+    private static void AddRedisScaleOut(
+        this IServiceCollection services,
+        ISignalRServerBuilder signalR,
+        IHealthChecksBuilder healthChecks,
+        string redisConnectionString)
+    {
+        // Connect at startup: if Redis is unreachable the instance should fail fast
+        // instead of running in a half-working state
+        var redis = ConnectionMultiplexer.Connect(redisConnectionString);
+        services.AddSingleton<IConnectionMultiplexer>(redis);
+
+        signalR.AddStackExchangeRedis(redisConnectionString, options =>
+        {
+            // Keeps this app's pub/sub channels separate if the Redis server is shared
+            options.Configuration.ChannelPrefix = RedisChannel.Literal("chat");
+        });
+
+        services.AddDataProtection()
+            .SetApplicationName("OnlineChatWithSignalR")
+            .PersistKeysToStackExchangeRedis(redis, "chat:data-protection-keys");
+
+        services.AddSingleton<RedisPresenceTracker>();
+        services.AddSingleton<IPresenceTracker>(provider => provider.GetRequiredService<RedisPresenceTracker>());
+        services.AddHostedService<PresenceHeartbeat>();
+
+        healthChecks.AddCheck<RedisHealthCheck>("redis");
     }
 }

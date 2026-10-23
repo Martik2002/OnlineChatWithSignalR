@@ -1,18 +1,12 @@
 namespace OnlineChatWithSignalR.Chat;
 
 /// <summary>
-/// Tracks which users are online and through which connections.
-/// <para>
-/// A user is online while they have at least one open connection. Counting connections
-/// (instead of a simple online flag) matters because one user often has several tabs or
-/// devices open: closing one tab must not mark them offline.
-/// </para>
-/// <para>
-/// Limitation: the state lives in the memory of this server process. With several API
-/// instances each server only sees its own connections; this is solved with Redis in #8.
-/// </para>
+/// Presence for a single server: the state lives in the memory of this process.
+/// Used when no Redis connection is configured (local development with one instance).
+/// With several API instances each server would only see its own connections, so
+/// <see cref="RedisPresenceTracker"/> is used instead.
 /// </summary>
-public sealed class PresenceTracker
+public sealed class InMemoryPresenceTracker : IPresenceTracker
 {
     private readonly Lock _lock = new();
     private readonly Dictionary<string, HashSet<string>> _connectionsByUser = [];
@@ -69,4 +63,16 @@ public sealed class PresenceTracker
             return _connectionsByUser.TryGetValue(userId, out var connections) ? connections.ToList() : [];
         }
     }
+
+    Task<bool> IPresenceTracker.ConnectedAsync(string userId, string connectionId) =>
+        Task.FromResult(Connected(userId, connectionId));
+
+    Task<bool> IPresenceTracker.DisconnectedAsync(string userId, string connectionId) =>
+        Task.FromResult(Disconnected(userId, connectionId));
+
+    Task<bool> IPresenceTracker.IsOnlineAsync(string userId) =>
+        Task.FromResult(IsOnline(userId));
+
+    Task<IReadOnlyList<string>> IPresenceTracker.GetConnectionsAsync(string userId) =>
+        Task.FromResult(GetConnections(userId));
 }
