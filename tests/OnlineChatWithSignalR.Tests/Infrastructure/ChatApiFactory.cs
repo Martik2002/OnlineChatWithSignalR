@@ -83,6 +83,14 @@ public sealed class ChatApiFactory : WebApplicationFactory<Program>, IAsyncLifet
         return client;
     }
 
+    /// <summary>Opens another connection for an existing user, like a second browser tab.</summary>
+    public async Task<ChatTestClient> OpenTabAsync(ChatTestClient user)
+    {
+        var tab = new ChatTestClient(user.Email, user.AccessToken, CreateHubConnection(user.AccessToken));
+        await tab.Connection.StartAsync();
+        return tab;
+    }
+
     private sealed record LoginResponse(string AccessToken, string RefreshToken, int ExpiresIn);
 }
 

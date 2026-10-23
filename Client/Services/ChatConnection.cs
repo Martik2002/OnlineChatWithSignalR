@@ -30,6 +30,8 @@ public sealed class ChatConnection(
     public event Func<RoomDto, Task>? RoomCreated;
     public event Func<Guid, string, Task>? MembershipChanged;
     public event Func<Task>? StateChanged;
+    public event Func<PresenceDto, Task>? PresenceChanged;
+    public event Func<TypingDto, Task>? UserTyping;
 
     /// <summary>Raised after an automatic reconnect: the client should catch up on missed messages.</summary>
     public event Func<Task>? Reconnected;
@@ -54,6 +56,8 @@ public sealed class ChatConnection(
         _hub.On<RoomDto>(nameof(IChatClient.RoomCreated), room => RaiseAsync(RoomCreated, room));
         _hub.On<Guid, string>(nameof(IChatClient.UserJoinedRoom), (roomId, user) => RaiseAsync(MembershipChanged, roomId, user));
         _hub.On<Guid, string>(nameof(IChatClient.UserLeftRoom), (roomId, user) => RaiseAsync(MembershipChanged, roomId, user));
+        _hub.On<PresenceDto>(nameof(IChatClient.PresenceChanged), presence => RaiseAsync(PresenceChanged, presence));
+        _hub.On<TypingDto>(nameof(IChatClient.UserTyping), typing => RaiseAsync(UserTyping, typing));
 
         _hub.Reconnecting += _ => RaiseAsync(StateChanged);
         _hub.Reconnected += async _ =>
@@ -85,6 +89,16 @@ public sealed class ChatConnection(
 
     public Task<MessagePage> GetMessagesAsync(GetMessagesRequest request) =>
         Hub.InvokeAsync<MessagePage>(nameof(IChatHub.GetMessages), request);
+
+    public Task<IReadOnlyList<RoomMemberDto>> GetRoomMembersAsync(Guid roomId) =>
+        Hub.InvokeAsync<IReadOnlyList<RoomMemberDto>>(nameof(IChatHub.GetRoomMembers), roomId);
+
+    /// <summary>
+    /// Fire-and-forget: SendAsync doesn't wait for the server's result, which is fine for a
+    /// typing signal (losing one is harmless) and keeps typing in the input box responsive.
+    /// </summary>
+    public Task StartTypingAsync(Guid roomId) =>
+        Hub.SendAsync(nameof(IChatHub.StartTyping), roomId);
 
     /// <summary>Closes the connection (on logout). StartAsync can be called again afterwards.</summary>
     public async Task StopAsync()

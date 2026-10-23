@@ -4,6 +4,8 @@ namespace OnlineChatWithSignalR.Chat;
 
 public sealed record CurrentUser(string Id, string Name);
 
+public sealed record RoomMemberInfo(string UserId, string UserName);
+
 /// <summary>
 /// An expected error caused by the client (invalid input, not a member, ...).
 /// Its message is safe to show to the user.

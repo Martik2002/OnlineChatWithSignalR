@@ -56,6 +56,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<ChatService>();
+        services.AddSingleton<PresenceTracker>();
 
         services.AddSignalR(options => options.AddFilter<ChatExceptionHubFilter>());
 
