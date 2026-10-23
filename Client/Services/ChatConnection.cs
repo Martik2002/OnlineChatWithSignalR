@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Options;
 using OnlineChatWithSignalR.Chat;
@@ -48,6 +49,12 @@ public sealed class ChatConnection(
             {
                 // Called on every connect and reconnect, so a refreshed token is always used
                 connection.AccessTokenProvider = auth.GetAccessTokenAsync;
+
+                // Normally SignalR first calls /negotiate and then opens the connection, and both
+                // requests must reach the same server ("sticky sessions" on the load balancer).
+                // Going straight to WebSockets is a single request, so any server can take it.
+                connection.SkipNegotiation = true;
+                connection.Transports = HttpTransportType.WebSockets;
             })
             .WithAutomaticReconnect(new KeepRetryingPolicy())
             .Build();
