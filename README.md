@@ -10,6 +10,7 @@ A real-time chat built with **ASP.NET Core SignalR**, **Blazor** and **PostgreSQ
 - 💬 Chat rooms (SignalR groups) with persistent message history
 - ⚡ Optimistic sending: messages appear instantly and are confirmed by the server
 - 🔁 Automatic reconnect with catch-up of missed messages and re-sending of unsent ones
+- 🟢 Online members per room and "is typing..." indicators
 - 🧾 **Idempotent sending**: client-generated message ids, so a retry never creates a duplicate
 - 📜 Cursor-based paging through history ("load older messages")
 - 🧪 Integration tests with real SignalR connections and PostgreSQL (Testcontainers), unit tests for the client logic
@@ -47,6 +48,9 @@ A real-time chat built with **ASP.NET Core SignalR**, **Blazor** and **PostgreSQ
 - **Idempotent sends.** The client generates the message id. The server returns the already-saved message for a repeated id and doesn't broadcast it again; concurrent duplicates are resolved by the primary key.
 - **Keyset paging.** Each message has a database-generated `Sequence`. "50 messages before sequence N" uses an index and stays correct while new messages arrive, unlike `OFFSET` paging.
 - **Catch-up after reconnect.** The client fetches the latest page for every open room and merges it. If the page doesn't overlap what it already has, it reloads instead of showing a silent gap.
+- **Presence counts connections, not users.** A user is online while at least one tab or device is connected, so closing one of several tabs doesn't mark them offline. Presence changes are only sent to users who share a room with them.
+- **Typing signals expire instead of being cancelled.** The client sends at most one "typing" signal every 2 seconds, and receivers hide it after 4 seconds without a new one. There is no "stopped typing" message that could get lost and leave the indicator stuck.
+- **Room membership applies to all tabs.** Joining or leaving a room in one tab updates the SignalR groups of all the user's connections.
 - **Thin hub, testable logic.** `ChatService` holds the server logic and `RoomTimeline` the client's merge rules, both independent of SignalR and the UI.
 
 ## Running Locally
@@ -87,5 +91,5 @@ dotnet test
 - [x] Accounts and authenticated hub
 - [x] Rooms and persistent messages
 - [x] Blazor chat UI
-- [ ] Online users and "typing..." indicators (#7)
+- [x] Online users and "typing..." indicators
 - [ ] Scale-out with a Redis backplane and multiple API instances (#8)

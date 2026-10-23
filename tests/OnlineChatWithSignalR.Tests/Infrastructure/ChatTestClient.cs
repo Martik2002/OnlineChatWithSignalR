@@ -11,6 +11,8 @@ namespace OnlineChatWithSignalR.Tests.Infrastructure;
 public sealed class ChatTestClient : IAsyncDisposable
 {
     private readonly ConcurrentQueue<MessageDto> _received = new();
+    private readonly ConcurrentQueue<PresenceDto> _presence = new();
+    private readonly ConcurrentQueue<TypingDto> _typing = new();
 
     public ChatTestClient(string email, string accessToken, HubConnection connection)
     {
@@ -18,6 +20,8 @@ public sealed class ChatTestClient : IAsyncDisposable
         AccessToken = accessToken;
         Connection = connection;
         Connection.On<MessageDto>("ReceiveMessage", message => _received.Enqueue(message));
+        Connection.On<PresenceDto>("PresenceChanged", presence => _presence.Enqueue(presence));
+        Connection.On<TypingDto>("UserTyping", typing => _typing.Enqueue(typing));
     }
 
     public string Email { get; }
@@ -25,6 +29,30 @@ public sealed class ChatTestClient : IAsyncDisposable
     public HubConnection Connection { get; }
 
     public IReadOnlyList<MessageDto> ReceivedMessages => _received.ToList();
+    public IReadOnlyList<PresenceDto> ReceivedPresence => _presence.ToList();
+    public IReadOnlyList<TypingDto> ReceivedTyping => _typing.ToList();
+
+    public Task<List<RoomMemberDto>> GetRoomMembersAsync(Guid roomId) =>
+        Connection.InvokeAsync<List<RoomMemberDto>>("GetRoomMembers", roomId);
+
+    public Task StartTypingAsync(Guid roomId) => Connection.InvokeAsync("StartTyping", roomId);
+
+    /// <summary>Waits until a condition on the received events is true, or fails after a timeout.</summary>
+    public static async Task WaitUntilAsync(Func<bool> condition, int timeoutSeconds = 10)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (condition())
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        throw new TimeoutException("Expected event was not received.");
+    }
 
     public Task<RoomDto> CreateRoomAsync(string? name = null) =>
         Connection.InvokeAsync<RoomDto>("CreateRoom", name ?? $"room-{Guid.NewGuid():N}");

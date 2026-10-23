@@ -16,6 +16,8 @@ public interface IChatHub
     Task LeaveRoom(Guid roomId);
     Task<MessageDto> SendMessage(SendMessageRequest request);
     Task<MessagePage> GetMessages(GetMessagesRequest request);
+    Task<IReadOnlyList<RoomMemberDto>> GetRoomMembers(Guid roomId);
+    Task StartTyping(Guid roomId);
 }
 
 /// <summary>Methods the server calls on connected clients.</summary>
@@ -26,4 +28,6 @@ public interface IChatClient
     Task RoomCreated(RoomDto room);
     Task UserJoinedRoom(Guid roomId, string userName);
     Task UserLeftRoom(Guid roomId, string userName);
+    Task PresenceChanged(PresenceDto presence);
+    Task UserTyping(TypingDto typing);
 }

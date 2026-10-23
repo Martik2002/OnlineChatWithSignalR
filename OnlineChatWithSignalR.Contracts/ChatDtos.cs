@@ -19,3 +19,14 @@ public sealed record GetMessagesRequest(Guid RoomId, long? BeforeSequence = null
 
 /// <param name="Messages">Ordered from oldest to newest.</param>
 public sealed record MessagePage(IReadOnlyList<MessageDto> Messages, bool HasMore);
+
+public sealed record RoomMemberDto(string UserId, string UserName, bool IsOnline);
+
+/// <summary>Sent to a user's rooms when the user comes online (first connection) or goes offline (last connection closed).</summary>
+public sealed record PresenceDto(string UserId, string UserName, bool IsOnline);
+
+/// <summary>
+/// "User is typing" signal. There is no "stopped typing" message: clients hide the indicator
+/// a few seconds after the last signal, so a closed tab can never leave it stuck.
+/// </summary>
+public sealed record TypingDto(Guid RoomId, string UserId, string UserName);

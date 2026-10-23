@@ -7,6 +7,7 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject ILogger<ChatPage> Logger
+@inject TimeProvider TimeProvider
 
 <PageTitle>@(SelectedRoom?.Name ?? "Chat")</PageTitle>
 
@@ -115,17 +116,40 @@
                 }
             </div>
 
+            <div class="typing" aria-live="polite">@TypingText</div>
+
             <form class="composer" @onsubmit="SendAsync" @onsubmit:preventDefault>
                 <input class="form-control" placeholder="Message # @SelectedRoom.Name" @bind="_draft"
-                       @bind:event="oninput" maxlength="2000" autocomplete="off"/>
+                       @bind:event="oninput" @bind:after="OnDraftChangedAsync" maxlength="2000" autocomplete="off"/>
                 <button class="btn btn-primary" type="submit" disabled="@string.IsNullOrWhiteSpace(_draft)">Send</button>
             </form>
         }
     </section>
+
+    @if (SelectedRoom is not null)
+    {
+        <aside class="members">
+            <div class="members-title">Members · @_members.Count(m => m.IsOnline) online</div>
+            @foreach (var member in _members)
+            {
+                <div class="member @(member.IsOnline ? "online" : "offline")" @key="member.UserId">
+                    <span class="dot" title="@(member.IsOnline ? "Online" : "Offline")"></span>
+                    <span class="member-name">@member.UserName</span>
+                    @if (member.UserName == Auth.Email)
+                    {
+                        <span class="you">you</span>
+                    }
+                </div>
+            }
+        </aside>
+    }
 </div>
 
 @code {
     private readonly Dictionary<Guid, RoomTimeline> _timelines = [];
+    private List<RoomMemberDto> _members = [];
+    private TypingTracker _typing = default!;
+    private Timer? _typingTimer;
     private List<RoomDto> _rooms = [];
     private Guid? _selectedRoomId;
     private string _draft = string.Empty;
@@ -140,6 +164,9 @@
     private RoomTimeline? SelectedTimeline =>
         _selectedRoomId is { } id && _timelines.TryGetValue(id, out var timeline) ? timeline : null;
 
+    private string? TypingText =>
+        _selectedRoomId is { } roomId ? TypingTracker.Describe(_typing.GetTypingUsers(roomId)) : null;
+
     private string StatusText => Chat.State switch
     {
         HubConnectionState.Connected => "Connected",
@@ -150,6 +177,8 @@
 
     protected override async Task OnInitializedAsync()
     {
+        _typing = new TypingTracker(TimeProvider);
+
         await Auth.EnsureLoadedAsync();
         if (!Auth.IsLoggedIn)
         {
@@ -162,6 +191,17 @@
         Chat.MembershipChanged += OnMembershipChanged;
         Chat.StateChanged += OnStateChanged;
         Chat.Reconnected += OnReconnected;
+        Chat.PresenceChanged += OnPresenceChanged;
+        Chat.UserTyping += OnUserTyping;
+
+        // Typing indicators expire after a few seconds without a new signal; re-render when they do
+        _typingTimer = new Timer(_ => InvokeAsync(() =>
+        {
+            if (_typing.RemoveExpired())
+            {
+                StateHasChanged();
+            }
+        }), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
 
         try
         {
@@ -213,7 +253,19 @@
             await RunAsync(async () => timeline.LoadLatest(await Chat.GetMessagesAsync(new GetMessagesRequest(roomId))));
         }
 
+        await LoadMembersAsync();
         _scrollToBottom = true;
+    }
+
+    private async Task LoadMembersAsync()
+    {
+        if (_selectedRoomId is not { } roomId)
+        {
+            _members = [];
+            return;
+        }
+
+        await RunAsync(async () => _members = (await Chat.GetRoomMembersAsync(roomId)).ToList());
     }
 
     private async Task CreateRoomAsync()
@@ -245,6 +297,7 @@
         await Chat.LeaveRoomAsync(roomId);
         _timelines.Remove(roomId);
         _selectedRoomId = null;
+        _members = [];
         await LoadRoomsAsync();
     });
 
@@ -273,9 +326,27 @@
         // so if the send has to be retried the server recognizes it and doesn't save it twice.
         var item = timeline.AddPending(Guid.NewGuid(), content);
         _draft = string.Empty;
+        _typing.ResetSendThrottle(roomId);
         _scrollToBottom = true;
 
         await TrySendAsync(roomId, timeline, item);
+    }
+
+    private async Task OnDraftChangedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_draft) || _selectedRoomId is not { } roomId || !_typing.ShouldSendTyping(roomId))
+        {
+            return;
+        }
+
+        try
+        {
+            await Chat.StartTypingAsync(roomId);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or TaskCanceledException)
+        {
+            // A lost typing signal is harmless; don't bother the user while offline
+        }
     }
 
     private async Task TrySendAsync(Guid roomId, RoomTimeline timeline, ChatItem item)
@@ -301,6 +372,9 @@
 
     private Task OnMessageReceived(MessageDto message) => InvokeAsync(async () =>
     {
+        // The sender finished typing this message
+        _typing.OnMessage(message.RoomId, message.SenderName);
+
         if (!_timelines.TryGetValue(message.RoomId, out var timeline) || !timeline.IsLoaded)
         {
             return;
@@ -330,7 +404,54 @@
     private Task OnMembershipChanged(Guid roomId, string userName) => InvokeAsync(async () =>
     {
         await RunAsync(LoadRoomsAsync);
+
+        if (roomId == _selectedRoomId)
+        {
+            if (SelectedRoom is not { IsMember: true })
+            {
+                // This user left the room from another tab
+                _timelines.Remove(roomId);
+                _selectedRoomId = null;
+                _members = [];
+            }
+            else
+            {
+                await LoadMembersAsync();
+            }
+        }
+
         StateHasChanged();
+    });
+
+    private Task OnPresenceChanged(PresenceDto presence) => InvokeAsync(() =>
+    {
+        var index = _members.FindIndex(m => m.UserId == presence.UserId);
+        if (index < 0)
+        {
+            return;
+        }
+
+        _members[index] = _members[index] with { IsOnline = presence.IsOnline };
+        _members = _members
+            .OrderByDescending(m => m.IsOnline)
+            .ThenBy(m => m.UserName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        StateHasChanged();
+    });
+
+    private Task OnUserTyping(TypingDto typing) => InvokeAsync(() =>
+    {
+        // Our own other tabs also receive the signal; ignore it
+        if (typing.UserName == Auth.Email)
+        {
+            return;
+        }
+
+        _typing.OnTyping(typing.RoomId, typing.UserName);
+        if (typing.RoomId == _selectedRoomId)
+        {
+            StateHasChanged();
+        }
     });
 
     private Task OnStateChanged() => InvokeAsync(StateHasChanged);
@@ -344,6 +465,7 @@
         await RunAsync(async () =>
         {
             await LoadRoomsAsync();
+            await LoadMembersAsync();
 
             foreach (var (roomId, timeline) in _timelines.Where(t => t.Value.IsLoaded).ToList())
             {
@@ -394,13 +516,19 @@
         return index >= 0 ? ex.Message[(index + marker.Length)..] : ex.Message;
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
+        if (_typingTimer is not null)
+        {
+            await _typingTimer.DisposeAsync();
+        }
+
+        Chat.PresenceChanged -= OnPresenceChanged;
+        Chat.UserTyping -= OnUserTyping;
         Chat.MessageReceived -= OnMessageReceived;
         Chat.RoomCreated -= OnRoomCreated;
         Chat.MembershipChanged -= OnMembershipChanged;
         Chat.StateChanged -= OnStateChanged;
         Chat.Reconnected -= OnReconnected;
-        return ValueTask.CompletedTask;
     }
 }

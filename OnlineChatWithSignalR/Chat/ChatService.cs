@@ -201,6 +201,18 @@ public sealed class ChatService(ChatDbContext db, TimeProvider timeProvider)
         return new MessagePage(page, hasMore);
     }
 
+    public async Task<IReadOnlyList<RoomMemberInfo>> GetMembersAsync(
+        CurrentUser user, Guid roomId, CancellationToken ct = default)
+    {
+        await EnsureMemberAsync(user.Id, roomId, ct);
+
+        return await db.RoomMembers
+            .AsNoTracking()
+            .Where(m => m.RoomId == roomId)
+            .Select(m => new RoomMemberInfo(m.UserId, m.User.UserName!))
+            .ToListAsync(ct);
+    }
+
     public Task<bool> IsMemberAsync(string userId, Guid roomId, CancellationToken ct = default) =>
         db.RoomMembers.AnyAsync(m => m.RoomId == roomId && m.UserId == userId, ct);
 
